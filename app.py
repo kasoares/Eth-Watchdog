@@ -17,8 +17,8 @@ RPC_URL = os.getenv("RPC_URL", "https://eth.llamarpc.com")
 # Intervalo entre verificações (segundos)
 CHECK_INTERVAL = 10
 
-# Frequência de relatórios de status (a cada N verificações bem-sucedidas)
-STATUS_REPORT_INTERVAL = 5  # 6 verificações × 10s = 60s (1 minuto)
+# Frequência de relatórios de status (a cada N verificações)
+STATUS_REPORT_INTERVAL = 6  # 6 verificações × 10s = 60s (1 minuto)
 
 # Histórico de latências para o período atual de relatório
 current_period_latencies = []
@@ -123,27 +123,38 @@ def get_timestamp() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
-def send_status_report(check_count: int, success_count: int, period_latencies: list, last_block: int):
+def send_status_report(total_checks: int, period_checks: int, period_latencies: list, last_block: int):
     """
     Sends periodic status report to Discord with observability metrics.
     
     Args:
-        check_count: Total number of checks performed
-        success_count: Number of successful checks in current period
-        period_latencies: Latencies from current reporting period
+        total_checks: Total number of checks performed since start
+        period_checks: Number of checks in current reporting period
+        period_latencies: Latencies from successful checks in current period
         last_block: Last observed block height
     """
-    uptime_percentage = (success_count / check_count * 100) if check_count > 0 else 0
-    avg_latency = mean(period_latencies) if period_latencies else 0
-    min_latency = min(period_latencies) if period_latencies else 0
-    max_latency = max(period_latencies) if period_latencies else 0
+    # Calculate metrics only from successful checks
+    successful_checks = len(period_latencies)
+    uptime_percentage = (successful_checks / period_checks * 100) if period_checks > 0 else 0
     
-    report = (
-        f"**STATUS REPORT**\n"
-        f"Checks: {check_count} | Success: {success_count} | Uptime: {uptime_percentage:.1f}%\n"
-        f"Latency: {avg_latency:.2f}ms (min: {min_latency:.2f}ms | max: {max_latency:.2f}ms)\n"
-        f"Last Block: {last_block:,}"
-    )
+    if period_latencies:
+        avg_latency = mean(period_latencies)
+        min_latency = min(period_latencies)
+        max_latency = max(period_latencies)
+        
+        report = (
+            f"**STATUS REPORT - Last Minute**\n"
+            f"Total Checks: {total_checks} | Period: {successful_checks}/{period_checks} | Uptime: {uptime_percentage:.1f}%\n"
+            f"Latency: {avg_latency:.2f}ms (min: {min_latency:.2f}ms | max: {max_latency:.2f}ms)\n"
+            f"Current Block: {last_block:,}"
+        )
+    else:
+        report = (
+            f"**STATUS REPORT - Last Minute**\n"
+            f"Total Checks: {total_checks} | Period: {successful_checks}/{period_checks} | Uptime: {uptime_percentage:.1f}%\n"
+            f"No successful checks in this period\n"
+            f"Last Known Block: {last_block:,}"
+        )
     
     send_discord_alert(report)
 
@@ -173,10 +184,12 @@ def main():
     else:
         send_discord_alert("Eth-Watchdog started but initial health check failed!")
     
+    # Clear initial check from period tracking (don't count startup check in first report)
+    current_period_latencies.clear()
+    
     # Monitoring metrics
-    check_count = 0
-    success_count = 0
-    period_success_count = 0
+    total_checks = 0
+    period_checks = 0
     last_block_height = 0
     
     # Infinite monitoring loop
@@ -184,30 +197,29 @@ def main():
     while True:
         try:
             result = check_eth_status()
-            check_count += 1
+            total_checks += 1
+            period_checks += 1
             
             if result["success"]:
-                success_count += 1
-                period_success_count += 1
                 last_block_height = result["block_height"]
-                
-                # Send periodic status report
-                if period_success_count >= STATUS_REPORT_INTERVAL:
-                    send_status_report(
-                        check_count, 
-                        period_success_count,
-                        current_period_latencies.copy(),
-                        last_block_height
-                    )
-                    # Reset period counters
-                    period_success_count = 0
-                    current_period_latencies.clear()
+            
+            # Send periodic status report after N checks (successful or not)
+            if period_checks >= STATUS_REPORT_INTERVAL:
+                send_status_report(
+                    total_checks, 
+                    period_checks,
+                    current_period_latencies.copy(),
+                    last_block_height
+                )
+                # Reset period counters
+                period_checks = 0
+                current_period_latencies.clear()
             
             time.sleep(CHECK_INTERVAL)
             
         except KeyboardInterrupt:
             print("\n\n[SHUTDOWN] Monitoring interrupted by user")
-            send_discord_alert(f"Eth-Watchdog shutdown - Final stats: {success_count}/{check_count} successful checks")
+            send_discord_alert(f"Eth-Watchdog shutdown - Total checks performed: {total_checks}")
             break
             
         except Exception as e:
