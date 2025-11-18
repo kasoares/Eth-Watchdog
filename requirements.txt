@@ -1,0 +1,8 @@
+# Eth-Watchdog Dependencies
+# Kept minimalist to reduce Docker image size
+
+# HTTP Library - only dependency needed for RPC monitoring
+requests==2.31.0
+
+# Note: Intentionally doesn't use web3.py to keep image lightweight
+# Basic JSON-RPC monitoring can be done with pure requests
