@@ -263,14 +263,6 @@ docker logs watchdog  # Check for errors
 - Check network connectivity
 - Verify endpoint rate limits
 
-## Future Enhancements
-
-- Prometheus metrics export
-- Multiple endpoint monitoring
-- Grafana dashboard integration
-- Historical data persistence
-- Telegram/Slack support
-
 ## License
 
 MIT License - See LICENSE for details
